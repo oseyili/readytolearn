@@ -1,4 +1,4 @@
-﻿databases:
+databases:
   - name: readytolearn-db
     databaseName: readytolearn
     user: readytolearn
@@ -7,8 +7,8 @@ services:
   - type: web
     name: readytolearn-api
     env: node
-    buildCommand: pnpm i --frozen-lockfile=false && pnpm -C apps/api db:up
-    startCommand: pnpm -C apps/api start
+    buildCommand: corepack enable && pnpm i --frozen-lockfile=false && pnpm -C apps/api db:up
+    startCommand: corepack enable && pnpm -C apps/api start
     envVars:
       - key: DATABASE_URL
         fromDatabase:
@@ -34,8 +34,8 @@ services:
   - type: web
     name: readytolearn-web
     env: node
-    buildCommand: pnpm i --frozen-lockfile=false && pnpm -C apps/web build
-    startCommand: pnpm -C apps/web start
+    buildCommand: corepack enable && pnpm i --frozen-lockfile=false && pnpm -C apps/web build
+    startCommand: corepack enable && pnpm -C apps/web start
     envVars:
       - key: NEXT_PUBLIC_API_URL
         value: https://readytolearn-api.onrender.com

@@ -3,8 +3,8 @@ export const dynamic = "force-dynamic";
 export default function Page() {
   return (
     <main style={{maxWidth: 980, margin: "0 auto", padding: 24}}>
-      <h1 style={{fontSize: 28, fontWeight: 700, marginBottom: 8}}>Verify Receipt</h1>
-      <p style={{opacity: 0.85, marginBottom: 16}}>Paste a receipt ID to verify purchase authenticity.</p>
+      <h1 style={{fontSize: 28, fontWeight: 700, marginBottom: 8}}>Courses</h1>
+      <p style={{opacity: 0.85, marginBottom: 16}}>Browse learning paths across all subjects. Search and filters will appear here.</p>
       <div style={{display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 12}}>
         <section style={{border: "1px solid rgba(255,255,255,0.12)", borderRadius: 14, padding: 14}}>
           <h2 style={{fontSize: 16, fontWeight: 650, marginBottom: 6}}>What you can do here</h2>

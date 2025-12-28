@@ -465,7 +465,7 @@ app.get("/certificates/pdf/:publicId", async (req, res) => {
   doc.fontSize(18).text(cert.title, { align: "center" });
   doc.moveDown(1);
 
-  doc.fontSize(11).text(`Level: ${cert.level}   ·   Language: ${cert.language}`, { align: "center" });
+  doc.fontSize(11).text(`Level: ${cert.level}   Â·   Language: ${cert.language}`, { align: "center" });
   doc.moveDown(0.8);
   doc.fontSize(11).text(`Issued: ${new Date(cert.issued_at).toISOString().slice(0,10)}`, { align: "center" });
   doc.moveDown(1.2);
@@ -684,14 +684,14 @@ app.get("/admin/legacy/gifts/receipt/:id.pdf", requireAuth, requireRole("admin")
   const doc = new PDFDocument({ size: "A4", margin: 50 });
   doc.pipe(res);
 
-  doc.fontSize(18).text("Readytolearn — Legacy Gift Receipt", { align: "left" });
+  doc.fontSize(18).text("Readytolearn â€” Legacy Gift Receipt", { align: "left" });
   doc.moveDown(0.5);
   doc.fontSize(10).fillColor("#666").text("Informational receipt for executor/solicitor records. Not legal or tax advice.");
   doc.fillColor("#000");
   doc.moveDown();
 
   const amount = (Number(g.amount_cents || 0) / 100).toFixed(2);
-  doc.fontSize(12).text(`Receipt number: ${g.receipt_number || '—'}`);
+  doc.fontSize(12).text(`Receipt number: ${g.receipt_number || 'â€”'}`);
       doc.text(`Gift ID: ${g.id}`);
       if (g.receipt_hash) doc.text(`Receipt hash (SHA-256): ${g.receipt_hash}`);
   doc.text(`Date received: ${new Date(g.received_at).toISOString()}`);
@@ -781,7 +781,7 @@ app.get("/admin/legacy/report/:year.pdf", requireAuth, requireRole("admin"), asy
   const doc = new PDFDocument({ size: "A4", margin: 50 });
   doc.pipe(res);
 
-  doc.fontSize(18).text(`Readytolearn — Legacy Giving Impact Report (${year})`);
+  doc.fontSize(18).text(`Readytolearn â€” Legacy Giving Impact Report (${year})`);
   doc.moveDown(0.5);
   doc.fontSize(10).fillColor("#666").text("Internal/admin report for transparency. Not legal or tax advice.");
   doc.fillColor("#000");
@@ -797,7 +797,7 @@ app.get("/admin/legacy/report/:year.pdf", requireAuth, requireRole("admin"), asy
   doc.fontSize(14).text("Verified gifts by method");
   doc.fontSize(12);
   if (methods.length === 0) doc.text("No verified gifts recorded for this year.");
-  methods.forEach(m => doc.text(`• ${m.label}: ${m.count}`));
+  methods.forEach(m => doc.text(`â€¢ ${m.label}: ${m.count}`));
   doc.moveDown();
 
   doc.fontSize(14).text("Notes");
@@ -889,20 +889,20 @@ app.post("/sponsorships/create-session", async (req, res) => {
   if (kind === "certificate") {
     // sponsor a certificate purchase (fixed)
     unitAmountCents = currency === "gbp" ? 1999 : currency === "eur" ? 1999 : 1999;
-    name = "Compassionate Give — Sponsor a Certificate";
+    name = "Compassionate Give â€” Sponsor a Certificate";
   } else if (kind === "cohort") {
     // sponsor a cohort seat bundle (cohortSize required)
     const size = cohortSize ?? 20;
-    // £9.99 per seat as a starter; fixed to keep it predictable
+    // Â£9.99 per seat as a starter; fixed to keep it predictable
     const perSeat = currency === "gbp" ? 999 : currency === "eur" ? 999 : 999;
     unitAmountCents = perSeat;
     qty = size;
-    name = `Compassionate Give — Sponsor a Cohort (${size} learners)`;
+    name = `Compassionate Give â€” Sponsor a Cohort (${size} learners)`;
   } else {
     // pool: custom donation
     const a = amount ?? 25;
     unitAmountCents = Math.round(a * 100);
-    name = "Compassionate Give — Learning Pool Donation";
+    name = "Compassionate Give â€” Learning Pool Donation";
   }
 
   // Pre-create a sponsorship record (pending)
@@ -1029,7 +1029,7 @@ app.post("/payments/create-session", requireAuth, async (req, res) => {
   res.json({ url: session.url });
 });
 
-const port = Number(process.env.PORT ?? 5050);
+const PORT = Number(process.env.PORT || 5050);
 app.listen(port, () => console.log(`Readytolearn API listening on :${port}`));
 
 
