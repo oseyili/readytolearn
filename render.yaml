@@ -1,0 +1,41 @@
+﻿databases:
+  - name: readytolearn-db
+    databaseName: readytolearn
+    user: readytolearn
+
+services:
+  - type: web
+    name: readytolearn-api
+    env: node
+    buildCommand: pnpm i --frozen-lockfile=false && pnpm -C apps/api db:up
+    startCommand: pnpm -C apps/api start
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: readytolearn-db
+          property: connectionString
+      - key: JWT_SECRET
+        value: cmgtIYdeDIt1z5UY30rkFeWiPlQeQ4i6uhcKjFT6
+      - key: NODE_ENV
+        value: production
+      - key: PUBLIC_WEB_URL
+        value: https://readytolearn-web.onrender.com
+      - key: CORS_ORIGIN
+        value: https://readytolearn-web.onrender.com
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
+      - key: STRIPE_SUCCESS_URL
+        value: https://readytolearn-web.onrender.com/portal/payments?status=success
+      - key: STRIPE_CANCEL_URL
+        value: https://readytolearn-web.onrender.com/portal/payments?status=cancel
+
+  - type: web
+    name: readytolearn-web
+    env: node
+    buildCommand: pnpm i --frozen-lockfile=false && pnpm -C apps/web build
+    startCommand: pnpm -C apps/web start
+    envVars:
+      - key: NEXT_PUBLIC_API_URL
+        value: https://readytolearn-api.onrender.com

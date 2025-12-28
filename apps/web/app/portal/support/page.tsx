@@ -1,0 +1,1 @@
+export default function Page(){return(<div className='card'><div className='h1'>Support</div><div className='muted'>AI support + human escalation. Caregiver/educator collaboration (consent-based).</div></div>);}

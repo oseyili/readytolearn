@@ -1,0 +1,22 @@
+{
+  "expo": {
+    "name": "Readytolearn",
+    "slug": "readytolearn-master-portal-v2",
+    "scheme": "readytolearn",
+    "version": "0.0.2",
+    "orientation": "portrait",
+    "platforms": [
+      "ios",
+      "android",
+      "web"
+    ],
+    "plugins": [
+      "expo-router"
+    ],
+    "extra": {
+      "router": {
+        "origin": "app"
+      }
+    }
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "name": "@readytolearn/mobile",
+  "private": true,
+  "main": "expo-router/entry",
+  "scripts": {
+    "dev": "expo start",
+    "web": "expo start --web"
+  },
+  "dependencies": {
+    "expo": "~54.0.0",
+    "react": "18.3.1",
+    "react-native": "0.76.0",
+    "expo-router": "~4.0.10",
+    "expo-status-bar": "~2.0.0",
+    "@react-native-async-storage/async-storage": "1.23.1",
+    "@readytolearn/ui": "workspace:*"
+  }
+}
