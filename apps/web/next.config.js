@@ -1,8 +1,10 @@
 ﻿/** @type {import('next').NextConfig} */
 const nextConfig = {
-  // Avoid Windows symlink EPERM by not emitting standalone output on win32.
-  // On Render/Linux, standalone is enabled automatically.
-  ...(process.platform !== "win32" ? { output: "standalone" } : {}),
+  // Static export -> generates apps/web/out for Render Static Site
+  output: "export",
+
+  // Optional but commonly needed for static hosting (uncomment if you use <Image />)
+  // images: { unoptimized: true },
 };
 
 module.exports = nextConfig;
