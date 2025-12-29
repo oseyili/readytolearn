@@ -1,35 +1,41 @@
-import express from "express";
-import cors from "cors";
-import crypto from "crypto";
+"use strict";
+
+const express = require("express");
+const cors = require("cors");
 
 const app = express();
 app.disable("x-powered-by");
 app.use(cors({ origin: true, credentials: true }));
 app.use(express.json({ limit: "2mb" }));
 
+// Render sets PORT automatically. We respect it.
 const PORT = Number(process.env.PORT || 5050);
 
-/**
- * Stripe is OPTIONAL at first deploy.
- * If STRIPE_SECRET_KEY is missing, payment routes return a clean 503 instead of crashing.
- */
+// Stripe is OPTIONAL. If keys aren't set, payments endpoints return 503 (not crash).
 let stripe = null;
-if (process.env.STRIPE_SECRET_KEY && process.env.STRIPE_SECRET_KEY !== "disabled") {
-  const Stripe = (await import("stripe")).default;
-  stripe = new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: "2024-06-20" });
-} else {
-  console.warn("[Readytolearn] Stripe not configured yet. Payments disabled until STRIPE_SECRET_KEY is set.");
+try {
+  const key = process.env.STRIPE_SECRET_KEY;
+  if (key && key !== "disabled") {
+    const Stripe = require("stripe");
+    stripe = new Stripe(key);
+  } else {
+    console.log("[Readytolearn] Stripe not configured yet. Payments disabled until STRIPE_SECRET_KEY is set.");
+  }
+} catch (e) {
+  console.log("[Readytolearn] Stripe init skipped:", e.message);
+  stripe = null;
 }
 
-/** Basic health */
+// Health
 app.get("/health", (_req, res) => res.json({ ok: true, service: "readytolearn-api" }));
 
-/** Simple in-memory courses (safe default). Replace with DB later. */
-function makeCourses(n=200) {
-  const levels = ["Beginner","Intermediate","Advanced","Professional"];
+// In-memory courses (safe default; DB can be added later)
+function makeCourses(n) {
+  n = n || 300;
+  const levels = ["Beginner", "Intermediate", "Advanced", "Professional"];
   const subjects = ["Math","English","Science","Technology","Business","Health","Languages","Arts","Finance","Law","Engineering"];
   const out = [];
-  for (let i=1;i<=n;i++){
+  for (let i = 1; i <= n; i++) {
     const subject = subjects[i % subjects.length];
     const level = levels[i % levels.length];
     out.push({
@@ -38,14 +44,14 @@ function makeCourses(n=200) {
       subject,
       level,
       minutes: 30 + (i % 90),
-      summary: "A structured learning path with practice, support, and progress tracking.",
+      summary: "Structured learning path with practice, inclusive support, and progress tracking."
     });
   }
   return out;
 }
 const COURSES = makeCourses(400);
 
-/** Courses */
+// Courses API
 app.get("/courses", (req, res) => {
   const q = String(req.query.q || "").toLowerCase().trim();
   const level = String(req.query.level || "").toLowerCase().trim();
@@ -59,21 +65,21 @@ app.get("/courses", (req, res) => {
   res.json({ ok: true, count: rows.length, courses: rows.slice(0, 200) });
 });
 
-/** Receipt verification (placeholder that works). */
+// Receipt verification (placeholder that works)
 app.get("/payments/verify/:id", (req, res) => {
   const id = String(req.params.id || "");
-  // For now: treat any non-empty id as "found" format. Replace with DB lookup later.
-  if (!id || id.length < 6) return res.status(400).json({ ok:false, error:"Invalid receipt id" });
-  res.json({ ok:true, receipt:{ id, status:"verified", note:"Verification endpoint live. Hook to DB/Stripe later." } });
+  if (!id || id.length < 6) return res.status(400).json({ ok: false, error: "Invalid receipt id" });
+  res.json({ ok: true, receipt: { id, status: "verified", note: "Endpoint live. Hook to DB/Stripe later." } });
 });
 
-/** Stripe checkout session (only works once Stripe is configured) */
+// Stripe checkout (only works when Stripe is configured)
 app.post("/payments/checkout", async (req, res) => {
-  if (!stripe) return res.status(503).json({ ok:false, error:"Payments are not configured yet." });
+  if (!stripe) return res.status(503).json({ ok: false, error: "Payments are not configured yet." });
 
-  const { courseId } = req.body || {};
+  const courseId = req.body && req.body.courseId;
   const course = COURSES.find(c => c.id === courseId) || COURSES[0];
 
+  const webBase = process.env.WEB_BASE_URL || "https://example.com";
   try {
     const session = await stripe.checkout.sessions.create({
       mode: "payment",
@@ -86,25 +92,22 @@ app.post("/payments/checkout", async (req, res) => {
           product_data: { name: "Readytolearn - " + course.title }
         }
       }],
-      success_url: (process.env.WEB_BASE_URL || "https://example.com") + "/payments?success=1",
-      cancel_url: (process.env.WEB_BASE_URL || "https://example.com") + "/payments?canceled=1",
+      success_url: webBase + "/payments?success=1",
+      cancel_url: webBase + "/payments?canceled=1",
       metadata: { courseId: course.id }
     });
 
-    res.json({ ok:true, url: session.url, id: session.id });
+    res.json({ ok: true, url: session.url, id: session.id });
   } catch (e) {
     console.error(e);
-    res.status(500).json({ ok:false, error:"Checkout failed." });
+    res.status(500).json({ ok: false, error: "Checkout failed." });
   }
 });
 
-/** Webhook endpoint placeholder */
-app.post("/webhooks/stripe", (req, res) => {
-  // Implement signature verification when STRIPE_WEBHOOK_SECRET is set.
-  res.status(200).send("ok");
-});
+// Stripe webhook placeholder
+app.post("/webhooks/stripe", (_req, res) => res.status(200).send("ok"));
 
-/** Safe 404 */
-app.use((_req, res) => res.status(404).json({ ok:false, error:"Not found" }));
+// 404
+app.use((_req, res) => res.status(404).json({ ok: false, error: "Not found" }));
 
 app.listen(PORT, () => console.log("Readytolearn API listening on :" + PORT));
