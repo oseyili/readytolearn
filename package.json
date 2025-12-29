@@ -1,15 +1,14 @@
 ﻿{
-  "name": "readytolearn-monorepo",
+  "name": "readytolearn",
   "private": true,
   "packageManager": "pnpm@9.15.0",
   "engines": {
     "node": "20.x"
   },
   "scripts": {
-    "dev:web": "pnpm -C apps/web dev",
-    "dev:api": "pnpm -C apps/api dev",
     "build:web": "pnpm -C apps/web build",
     "start:web": "pnpm -C apps/web start",
-    "lint:web": "pnpm -C apps/web lint"
+    "build:api": "pnpm -C apps/api build",
+    "start:api": "pnpm -C apps/api start"
   }
 }
