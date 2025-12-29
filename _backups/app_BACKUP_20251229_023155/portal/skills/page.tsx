@@ -1,0 +1,1 @@
+export default function Page(){return(<div className='card'><div className='h1'>My Skills</div><div className='muted'>Your Skill Passport: evidence-backed, verifiable, and employer-readable.</div></div>);}

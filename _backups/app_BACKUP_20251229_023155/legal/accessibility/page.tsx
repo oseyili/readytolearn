@@ -1,0 +1,2 @@
+﻿export default function Accessibility(){return(<div className="card"><div className="h1">Accessibility Statement</div><div className="muted">Effective date: 2025-12-25</div><hr/><div className="muted" style={{  whiteSpace: "pre-wrap"   }}>"Readytolearn aims to conform to WCAG 2.2 AA.\nWe support screen readers, keyboard navigation, high contrast, large text, calm layouts, and SEN-friendly pacing.\nIf you encounter a barrier, contact support so we can help and improve."</div></div>);}
+

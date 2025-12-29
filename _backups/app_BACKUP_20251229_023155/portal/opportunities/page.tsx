@@ -1,0 +1,1 @@
+export default function Page(){return(<div className='card'><div className='h1'>Opportunities</div><div className='muted'>Internships, training, and on-the-job opportunities matched by skill readiness.</div></div>);}
