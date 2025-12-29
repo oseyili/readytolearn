@@ -1,35 +1,30 @@
-import Link from "next/link";
-
-export default function Home() {
+export default function Page() {
   return (
-    <div className="grid">
-      <div className="card col-12">
-        <div className="h1">Readytolearn</div>
-        <div className="muted">A modern, inclusive, AI-assisted learning platform with real career outcomes.</div>
-        <hr />
-        <div className="row">
-          <Link className="btn primary" href="/portal">Open Learning Portal</Link>
-          <Link className="btn" href="/about">About</Link>
-          <Link className="btn" href="/compassionate-give">Compassionate Give</Link>
-          <Link className="btn" href="/sponsors">Sponsors</Link>
-          <Link className="btn" href="/partners">Partners</Link>
-          <Link className="btn" href="/investors">Investors</Link>
-          <Link className="btn" href="/legacy-giving">Legacy Giving</Link>
-          <Link className="btn" href="/legacy-intent">Legacy Intent</Link>
-          <Link className="btn" href="/careers">Careers</Link>
-          <Link className="btn" href="/legal/terms">Terms</Link>
-          <Link className="btn" href="/legal/privacy">Privacy</Link>
-          <Link className="btn" href="/legal/accessibility">Accessibility</Link>
-        </div>
-      </div>
+    <main style={{ maxWidth: 980, margin: "0 auto", padding: 24 }}>
+      <h1 style={{ fontSize: 34, margin: "0 0 8px" }}>Welcome to Readytolearn</h1>
+      <p style={{ fontSize: 16, opacity: 0.9, marginTop: 0 }}>
+        Learn any subject, at any level, in any language — with inclusive support systems and career pathways.
+      </p>
 
-      <div className="card col-12">
-        <div className="h2">What you can do today</div>
-        <div className="muted" style={{lineHeight: 1.6}}>
-          Browse courses, learn with support, earn certificates, and share verifiable credentials with employers.
-          Sponsors can fund learning through Compassionate Give — ethically and transparently.
-        </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 12, marginTop: 16 }}>
+        <section style={{ border: "1px solid #e5e7eb", borderRadius: 14, padding: 14 }}>
+          <h2 style={{ marginTop: 0 }}>Learners</h2>
+          <ul style={{ margin: 0, paddingLeft: 18, lineHeight: 1.6 }}>
+            <li>Beginner to professional learning tracks</li>
+            <li>Accessible design for disability and SEN learners</li>
+            <li>Certificates (paid option) with verifiable receipts</li>
+          </ul>
+        </section>
+
+        <section style={{ border: "1px solid #e5e7eb", borderRadius: 14, padding: 14 }}>
+          <h2 style={{ marginTop: 0 }}>Support</h2>
+          <ul style={{ margin: 0, paddingLeft: 18, lineHeight: 1.6 }}>
+            <li>Compassionate Give: sponsor others to learn</li>
+            <li>Partners: training + internships + job pathways</li>
+            <li>Investor-ready narrative and metrics pages</li>
+          </ul>
+        </section>
       </div>
-    </div>
+    </main>
   );
 }

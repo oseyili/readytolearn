@@ -1,10 +1,10 @@
-﻿export const metadata = { title: "Privacy" };
+export const metadata = { title: "Privacy" };
 
 export default function Page() {
   return (
-    <main style={{ padding: '2rem', maxWidth: 900 }}>
-      <h1>Privacy</h1>
-      <p>Your data privacy and protection.</p>
+    <main style={{ maxWidth: 980, margin: "0 auto", padding: 24 }}>
+      <h1 style={{ fontSize: 28, margin: "0 0 8px" }}>Privacy</h1>
+      <p style={{ opacity: 0.9, marginTop: 0 }}>Privacy policy and data protection principles.</p>
     </main>
   );
 }
