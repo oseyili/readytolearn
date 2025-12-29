@@ -1,11 +1,6 @@
-{
-  "name": "readytolearn-perfect-monorepo",
-  "private": true,
-  "packageManager": "pnpm@9.0.0",
-  "scripts": {
-    "dev:web": "pnpm -C apps/web dev",
-    "dev:api": "pnpm -C apps/api dev",
-    "dev:mobile": "pnpm -C apps/mobile dev",
-    "db:up": "pnpm -C apps/api db:up"
-  }
+﻿{
+  "engines": {
+    "node": "20.x"
+  },
+  "packageManager": "pnpm@9.15.0"
 }
