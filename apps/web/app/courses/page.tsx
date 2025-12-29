@@ -36,7 +36,7 @@ export default function CoursesPage({
 
   const linkFor = (p: number) => {
     const params = new URLSearchParams();
-    if (q) params.set("q", q);
+    if (q) params.set("q", searchParams?.q ?? "");
     if (track) params.set("track", track);
     if (level) params.set("level", level);
     if (p > 1) params.set("page", String(p));
@@ -59,7 +59,7 @@ export default function CoursesPage({
           gap: 10,
         }}
       >
-        <input name="q" placeholder="Search courses…" defaultValue={q} />
+        <input name="q" placeholder="Search courses…" defaultValue={searchParams?.q ?? ""} />
         <input name="track" placeholder="Track" defaultValue={track} />
         <input name="level" placeholder="Level" defaultValue={level} />
         <button className="btn primary">Filter</button>
@@ -67,11 +67,11 @@ export default function CoursesPage({
 
       <div style={{ marginTop: 16, display: "grid", gap: 12 }}>
         {pageItems.map((c) => (
-          <div key={c.id} className="card">
+          <div key={c.id} className="card" style={{ padding: 14 }}>
             <div style={{ fontWeight: 800 }}>{c.title}</div>
             <div className="muted">{c.summary}</div>
             <div className="muted" style={{ marginTop: 6 }}>
-              Track: {c.track} • Level: {c.level} • {c.minutes} min
+              Track: {c.track} • Level: {c.level} • {c.minutes ?? c.durationMinutes} min
             </div>
           </div>
         ))}
@@ -81,17 +81,21 @@ export default function CoursesPage({
         style={{
           display: "flex",
           justifyContent: "space-between",
+          alignItems: "center",
           marginTop: 16,
+          gap: 10,
         }}
       >
-        <Link className="btn" href={linkFor(safePage - 1)}>
+        <Link className="btn" href={linkFor(Math.max(1, safePage - 1))} aria-disabled={safePage === 1}>
           Prev
         </Link>
+
         <div className="muted">
-          Showing {(safePage - 1) * PAGE_SIZE + 1}–
-          {Math.min(safePage * PAGE_SIZE, total)} of {total}
+          Showing {(safePage - 1) * PAGE_SIZE + 1}–{Math.min(safePage * PAGE_SIZE, total)} of{" "}
+          {total.toLocaleString()}
         </div>
-        <Link className="btn" href={linkFor(safePage + 1)}>
+
+        <Link className="btn" href={linkFor(Math.min(totalPages, safePage + 1))} aria-disabled={safePage === totalPages}>
           Next
         </Link>
       </div>
