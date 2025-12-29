@@ -3,25 +3,34 @@ import { COURSES } from "./courses.data";
 
 export const dynamic = "force-static";
 
+function toStr(v: unknown) {
+  return typeof v === "string" ? v : "";
+}
+
 export default function CoursesPage({
   searchParams,
 }: {
-  searchParams?: { page?: string; q?: string; track?: string; level?: string };
+  searchParams?: Record<string, string | string[] | undefined>;
 }) {
   const PAGE_SIZE = 24;
 
-  const page = Math.max(1, Number(searchParams?.page ?? "1"));
-  const q = (searchParams?.q ?? "").toLowerCase().trim();
-  const track = (searchParams?.track ?? "").trim();
-  const level = (searchParams?.level ?? "").trim();
+  const qRaw = toStr(searchParams?.q);
+  const trackRaw = toStr(searchParams?.track);
+  const levelRaw = toStr(searchParams?.level);
+  const pageRaw = toStr(searchParams?.page);
 
-  let results = COURSES as any[];
+  const q = qRaw.toLowerCase().trim();
+  const track = trackRaw.trim();
+  const level = levelRaw.trim();
+  const page = Math.max(1, Number(pageRaw || "1") || 1);
 
-  if (track) results = results.filter((c) => c.track === track);
-  if (level) results = results.filter((c) => c.level === level);
+  let results: any[] = COURSES as any[];
+
+  if (track) results = results.filter((c) => String(c.track) === track);
+  if (level) results = results.filter((c) => String(c.level) === level);
   if (q) {
     results = results.filter((c) =>
-      `${c.title} ${c.summary}`.toLowerCase().includes(q)
+      `${c.title ?? ""} ${c.summary ?? ""}`.toLowerCase().includes(q)
     );
   }
 
@@ -29,16 +38,13 @@ export default function CoursesPage({
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const safePage = Math.min(page, totalPages);
 
-  const pageItems = results.slice(
-    (safePage - 1) * PAGE_SIZE,
-    safePage * PAGE_SIZE
-  );
+  const items = results.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
 
-  const linkFor = (p: number) => {
+  const href = (p: number) => {
     const params = new URLSearchParams();
-    if (q) params.set("q", searchParams?.q ?? "");
-    if (track) params.set("track", track);
-    if (level) params.set("level", level);
+    if (qRaw) params.set("q", qRaw);
+    if (trackRaw) params.set("track", trackRaw);
+    if (levelRaw) params.set("level", levelRaw);
     if (p > 1) params.set("page", String(p));
     const s = params.toString();
     return s ? `/courses?${s}` : "/courses";
@@ -48,54 +54,41 @@ export default function CoursesPage({
     <main className="card">
       <div className="h1">Courses</div>
       <div className="muted">
-        {total.toLocaleString()} courses • Page {safePage} of {totalPages}
+        {total.toLocaleString()} course(s) • Page {safePage} / {totalPages}
       </div>
-      <hr />
 
-      <form
-        style={{
-          display: "grid",
-          gridTemplateColumns: "1fr 200px 200px 140px",
-          gap: 10,
-        }}
-      >
-        <input name="q" placeholder="Search courses…" defaultValue={searchParams?.q ?? ""} />
-        <input name="track" placeholder="Track" defaultValue={track} />
-        <input name="level" placeholder="Level" defaultValue={level} />
-        <button className="btn primary">Filter</button>
-      </form>
+      <div style={{ marginTop: 12, display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <form style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <input name="q" placeholder="Search…" defaultValue={qRaw} />
+          <input name="track" placeholder="Track" defaultValue={trackRaw} />
+          <input name="level" placeholder="Level" defaultValue={levelRaw} />
+          <button className="btn primary" type="submit">Filter</button>
+          <Link className="btn" href="/courses">Reset</Link>
+        </form>
+      </div>
 
-      <div style={{ marginTop: 16, display: "grid", gap: 12 }}>
-        {pageItems.map((c) => (
-          <div key={c.id} className="card" style={{ padding: 14 }}>
-            <div style={{ fontWeight: 800 }}>{c.title}</div>
-            <div className="muted">{c.summary}</div>
+      <div style={{ marginTop: 14, display: "grid", gap: 12 }}>
+        {items.map((c) => (
+          <div key={String(c.id ?? c.slug)} className="card" style={{ padding: 14 }}>
+            <div style={{ fontWeight: 800 }}>{String(c.title ?? "Untitled")}</div>
+            <div className="muted">{String(c.summary ?? "")}</div>
             <div className="muted" style={{ marginTop: 6 }}>
-              Track: {c.track} • Level: {c.level} • {c.minutes ?? c.durationMinutes} min
+              Track: {String(c.track ?? "n/a")} • Level: {String(c.level ?? "n/a")} •{" "}
+              {String(c.minutes ?? c.durationMinutes ?? "n/a")} min
             </div>
           </div>
         ))}
       </div>
 
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          marginTop: 16,
-          gap: 10,
-        }}
-      >
-        <Link className="btn" href={linkFor(Math.max(1, safePage - 1))} aria-disabled={safePage === 1}>
+      <div style={{ display: "flex", justifyContent: "space-between", marginTop: 14 }}>
+        <Link className="btn" href={href(Math.max(1, safePage - 1))} aria-disabled={safePage === 1}>
           Prev
         </Link>
-
         <div className="muted">
           Showing {(safePage - 1) * PAGE_SIZE + 1}–{Math.min(safePage * PAGE_SIZE, total)} of{" "}
           {total.toLocaleString()}
         </div>
-
-        <Link className="btn" href={linkFor(Math.min(totalPages, safePage + 1))} aria-disabled={safePage === totalPages}>
+        <Link className="btn" href={href(Math.min(totalPages, safePage + 1))} aria-disabled={safePage === totalPages}>
           Next
         </Link>
       </div>
