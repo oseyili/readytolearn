@@ -3,7 +3,7 @@ import express from "express";
 import crypto from "crypto";
 import fs from "fs/promises";
 import path from "path";
-import { fileURLToPath, pathToFileURL } from "url";
+import { fileURLToPath } from "url";
 
 import { pool } from "./db/pool.js";
 import * as esbuild from "esbuild";
@@ -17,21 +17,25 @@ const __dirname = path.dirname(__filename);
 
 function mustBeAdmin(req, res) {
   const token = process.env.ADMIN_IMPORT_TOKEN;
-  // If no token is set, we block in production to avoid accidental public import.
+
+  // In production we require a token, otherwise anyone could import/overwrite data.
   if (!token && process.env.NODE_ENV === "production") {
-    return res.status(403).json({ ok: false, error: "ADMIN_IMPORT_TOKEN not set" });
+    res.status(403).json({ ok: false, error: "ADMIN_IMPORT_TOKEN not set" });
+    return false;
   }
-  if (!token) return true; // local/dev ok
+
+  // If no token at all (local/dev), allow.
+  if (!token) return true;
 
   const got = req.headers["x-admin-token"] || req.query.token;
   if (got !== token) {
-    return res.status(403).json({ ok: false, error: "forbidden" });
+    res.status(403).json({ ok: false, error: "forbidden" });
+    return false;
   }
   return true;
 }
 
 async function ensureTables() {
-  // Courses table (real course data)
   await pool.query(`
     CREATE TABLE IF NOT EXISTS courses (
       id uuid PRIMARY KEY,
@@ -44,7 +48,6 @@ async function ensureTables() {
     );
   `);
 
-  // Enrollments table (real-time enroll)
   await pool.query(`
     CREATE TABLE IF NOT EXISTS enrollments (
       id uuid PRIMARY KEY,
@@ -102,7 +105,6 @@ app.post("/enroll", async (req, res) => {
       return res.status(400).json({ ok: false, error: "learnerId and courseId required" });
     }
 
-    // validate course exists
     const check = await pool.query(`SELECT 1 FROM courses WHERE id=$1`, [courseId]);
     if (check.rowCount === 0) {
       return res.status(404).json({ ok: false, error: "course_not_found" });
@@ -124,12 +126,13 @@ app.post("/enroll", async (req, res) => {
 });
 
 /**
- * LIST ENROLLMENTS (optional but useful)
+ * LIST ENROLLMENTS
  * GET /enrollments?learnerId=<uuid>
  */
 app.get("/enrollments", async (req, res) => {
   try {
     await ensureTables();
+
     const learnerId = String(req.query.learnerId || "");
     if (!learnerId) return res.status(400).json({ ok: false, error: "learnerId required" });
 
@@ -151,12 +154,14 @@ app.get("/enrollments", async (req, res) => {
 
 /**
  * IMPORT REAL COURSES FROM apps/web/app/courses/courses.data.ts
+ * The file exports: export const COURSES = [...]
+ *
  * POST /admin/import-web-courses
  * Header: x-admin-token: <ADMIN_IMPORT_TOKEN>
+ * Or: /admin/import-web-courses?token=...
  */
 app.post("/admin/import-web-courses", async (req, res) => {
-  const okAdmin = mustBeAdmin(req, res);
-  if (okAdmin !== true) return;
+  if (!mustBeAdmin(req, res)) return;
 
   try {
     await ensureTables();
@@ -164,10 +169,8 @@ app.post("/admin/import-web-courses", async (req, res) => {
     const repoRoot = path.resolve(__dirname, "..", "..", ".."); // apps/api/src -> repo root
     const coursesTs = path.join(repoRoot, "apps", "web", "app", "courses", "courses.data.ts");
 
-    // Read TS file
     const source = await fs.readFile(coursesTs, "utf8");
 
-    // Transpile TS -> ESM JS in-memory
     const transformed = await esbuild.transform(source, {
       loader: "ts",
       format: "esm",
@@ -175,18 +178,21 @@ app.post("/admin/import-web-courses", async (req, res) => {
       sourcemap: false,
     });
 
-    // Import via data URL so Node can execute it
     const dataUrl = `data:text/javascript;base64,${Buffer.from(transformed.code).toString("base64")}`;
     const mod = await import(dataUrl);
 
-    // We expect something like: export const courses = [...]
-    const webCourses = mod.courses || mod.default || [];
+    // ✅ FIX: your file exports COURSES
+    const webCourses = mod.COURSES || mod.courses || mod.default || [];
+
     if (!Array.isArray(webCourses) || webCourses.length === 0) {
-      return res.status(400).json({ ok: false, error: "Could not read exported courses array" });
+      return res.status(400).json({
+        ok: false,
+        error: "Could not read exported courses array",
+        hint: "Expected `export const COURSES = [...]` in apps/web/app/courses/courses.data.ts",
+        exportedKeys: Object.keys(mod || {}),
+      });
     }
 
-    // Insert/update into DB
-    // We will generate a stable UUID from title+track if present, so reruns are safe.
     let inserted = 0;
     let updated = 0;
 
