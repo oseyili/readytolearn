@@ -1,1 +1,6 @@
-﻿export type Role = "student" | "teacher" | "parent" | "admin";
+﻿export type Role =
+  | "student"
+  | "learner"
+  | "supporter"
+  | "employer"
+  | "admin";
