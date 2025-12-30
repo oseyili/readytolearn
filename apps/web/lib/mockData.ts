@@ -6,7 +6,7 @@ export function getDemoRole(): Role {
 }
 
 export function getGreeting(role: Role) {
-  const map: Record<Role, string> = {
+  const map: Partial<Partial<Record<Role, $1>>> = {
     learner: "Todayâ€™s Focus",
     supporter: "Learner Support Overview",
     employer: "Talent Pipeline Overview",
@@ -28,4 +28,5 @@ export const demo = {
   admin: { users: 1240, certificates: 410, payments: "Card 62% Â· Mobile 24% Â· Bank 10% Â· Crypto 4%" },
   investor: { arr: "Â£420k", growth: "+12.3% QoQ", retention: "Monthly 74%" },
 };
+
 
