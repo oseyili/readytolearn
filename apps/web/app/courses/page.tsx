@@ -10,17 +10,13 @@ export default function CoursesPage({
 }) {
   const PAGE_SIZE = 24;
 
-  const page =
-    typeof searchParams?.page === "string"
-      ? Math.max(1, parseInt(searchParams.page, 10) || 1)
-      : 1;
+  const qRaw = typeof searchParams?.q === "string" ? searchParams.q : "";
+  const pageRaw = typeof searchParams?.page === "string" ? searchParams.page : "1";
 
-  const q =
-    typeof searchParams?.q === "string"
-      ? searchParams.q.toLowerCase().trim()
-      : "";
+  const q = qRaw.toLowerCase().trim();
+  const page = Math.max(1, parseInt(pageRaw, 10) || 1);
 
-  let results = COURSES as any[];
+  let results: any[] = COURSES as any[];
 
   if (q) {
     results = results.filter((c) =>
@@ -36,8 +32,7 @@ export default function CoursesPage({
 
   const href = (p: number) => {
     const params = new URLSearchParams();
-    if (typeof searchParams?.q === "string" && searchParams.q.trim())
-      params.set("q", searchParams.q);
+    if (qRaw) params.set("q", qRaw);
     if (p > 1) params.set("page", String(p));
     const s = params.toString();
     return s ? `/courses?${s}` : "/courses";
@@ -51,7 +46,7 @@ export default function CoursesPage({
       </div>
 
       <form style={{ marginTop: 12, display: "flex", gap: 8, flexWrap: "wrap" }}>
-        <input name="q" placeholder="Search courses…" defaultValue={typeof searchParams?.q === "string" ? searchParams.q : ""} />
+        <input name="q" placeholder="Search courses…" defaultValue={qRaw} />
         <button className="btn primary" type="submit">Search</button>
         <Link className="btn" href="/courses">Reset</Link>
       </form>
@@ -70,12 +65,16 @@ export default function CoursesPage({
       </div>
 
       <div style={{ display: "flex", justifyContent: "space-between", marginTop: 16 }}>
-        <Link className="btn" href={href(Math.max(1, safePage - 1))}>Prev</Link>
+        <Link className="btn" href={href(Math.max(1, safePage - 1))} aria-disabled={safePage === 1}>
+          Prev
+        </Link>
         <div className="muted">
           Showing {(safePage - 1) * PAGE_SIZE + 1}–{Math.min(safePage * PAGE_SIZE, total)} of{" "}
           {total.toLocaleString()}
         </div>
-        <Link className="btn" href={href(Math.min(totalPages, safePage + 1))}>Next</Link>
+        <Link className="btn" href={href(Math.min(totalPages, safePage + 1))} aria-disabled={safePage === totalPages}>
+          Next
+        </Link>
       </div>
     </main>
   );
