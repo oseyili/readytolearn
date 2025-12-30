@@ -14,8 +14,6 @@ type ApiCourse = {
 
 export default function CoursesPage() {
   const apiBase = useMemo(() => {
-    // Static export: this is baked at build time.
-    // So you MUST set NEXT_PUBLIC_API_URL in Render for readytolearn-web.
     return process.env.NEXT_PUBLIC_API_URL || "https://readytolearn-api.onrender.com";
   }, []);
 
@@ -31,7 +29,8 @@ export default function CoursesPage() {
         setLoading(true);
         setErr(null);
 
-        const res = await fetch(`${apiBase}/courses`, { cache: "no-store" });
+        // pull lots so you can SEE it immediately
+        const res = await fetch(`${apiBase}/courses?limit=2000&offset=0`, { cache: "no-store" });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
         const data = await res.json();
@@ -46,9 +45,7 @@ export default function CoursesPage() {
     }
 
     run();
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, [apiBase]);
 
   return (
@@ -63,8 +60,6 @@ export default function CoursesPage() {
       {err ? (
         <p style={{ marginTop: 16, color: "crimson" }}>
           Error: {err}
-          <br />
-          Check NEXT_PUBLIC_API_URL in Render (readytolearn-web).
         </p>
       ) : null}
 
@@ -77,8 +72,7 @@ export default function CoursesPage() {
           <div key={c.id} style={{ border: "1px solid #ddd", borderRadius: 10, padding: 14 }}>
             <div style={{ fontWeight: 700 }}>{c.title}</div>
             <div style={{ opacity: 0.8, marginTop: 4 }}>
-              {(c.level ?? "—")} • {(c.language ?? "en")} •{" "}
-              {c.is_free === true ? "Free" : c.is_free === false ? "Paid" : ""}
+              {(c.level ?? "—")} • {(c.language ?? "en")} • {c.is_free ? "Free" : "Paid"}
             </div>
             {c.description ? <div style={{ marginTop: 8 }}>{c.description}</div> : null}
           </div>
