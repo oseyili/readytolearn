@@ -1,6 +1,6 @@
-services:
+﻿services:
   # ======================
-  # WEB (Next.js Static)
+  # WEB — STATIC ONLY
   # ======================
   - type: web
     name: readytolearn-web
@@ -15,7 +15,7 @@ services:
         value: "20"
 
   # ======================
-  # API (Node backend)
+  # API — NODE SERVER
   # ======================
   - type: web
     name: readytolearn-api
