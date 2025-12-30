@@ -18,6 +18,7 @@ const __dirname = path.dirname(__filename);
 function mustBeAdmin(req, res) {
   const token = process.env.ADMIN_IMPORT_TOKEN;
 
+  // production must have a token
   if (!token && process.env.NODE_ENV === "production") {
     res.status(403).json({ ok: false, error: "ADMIN_IMPORT_TOKEN not set" });
     return false;
@@ -82,14 +83,19 @@ app.get("/subjects", async (req, res) => {
       ORDER BY count DESC, subject ASC;
     `);
 
-    res.json({
-      ok: true,
-      subjects: r.rows.map((x) => ({
-        subject: x.subject,
-        slug: slugify(x.subject),
-        count: x.count,
-      })),
-    });
+    // de-duplicate by subject in case of whitespace/case differences
+    const map = new Map();
+    for (const row of r.rows) {
+      const key = String(row.subject || "General").trim();
+      const prev = map.get(key);
+      map.set(key, (prev || 0) + Number(row.count || 0));
+    }
+
+    const subjects = Array.from(map.entries())
+      .map(([subject, count]) => ({ subject, count, slug: slugify(subject) }))
+      .sort((a, b) => b.count - a.count || a.subject.localeCompare(b.subject));
+
+    res.json({ ok: true, subjects });
   } catch (e) {
     console.error("GET /subjects error:", e);
     res.status(500).json({ ok: false, error: "db_error" });
@@ -106,24 +112,35 @@ app.get("/courses", async (req, res) => {
     const offset = Number.isFinite(offsetRaw) ? Math.max(offsetRaw, 0) : 0;
 
     const subjectQ = String(req.query.subject || "").trim();
+    const searchQ = String(req.query.q || "").trim();
 
-    let where = "";
-    const params = [limit, offset];
+    const where = [];
+    const params = [];
+    let i = 1;
+
     if (subjectQ) {
-      where = `
-        WHERE lower(regexp_replace(regexp_replace(subject,'&','and','g'),'[^a-zA-Z0-9]+','-','g')) = $3
-           OR lower(subject) = lower($4)
-      `;
-      params.push(subjectQ.toLowerCase(), subjectQ);
+      where.push(`(lower(regexp_replace(regexp_replace(subject,'&','and','g'),'[^a-zA-Z0-9]+','-','g')) = lower($${i}) OR lower(subject)=lower($${i+1}))`);
+      params.push(subjectQ, subjectQ);
+      i += 2;
     }
+
+    if (searchQ) {
+      where.push(`(title ILIKE $${i} OR description ILIKE $${i+1} OR subject ILIKE $${i+2})`);
+      params.push(`%${searchQ}%`, `%${searchQ}%`, `%${searchQ}%`);
+      i += 3;
+    }
+
+    params.push(limit, offset);
+
+    const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
 
     const list = await pool.query(
       `
       SELECT id, title, subject, level, language, description, is_free, source, created_at
       FROM courses
-      ${where}
+      ${whereSql}
       ORDER BY created_at DESC
-      LIMIT $1 OFFSET $2;
+      LIMIT $${i} OFFSET $${i+1};
       `,
       params
     );
@@ -185,13 +202,41 @@ app.get("/enrollments", async (req, res) => {
   }
 });
 
-app.post("/admin/replace-web-courses", async (req, res) => {
+# ADMIN: delete ONLY the numbered junk courses (keeps real ones)
+app.post("/admin/purge-numbered-courses", async (req, res) => {
   if (!mustBeAdmin(req, res)) return;
 
   try {
     await ensureTables();
 
-    await pool.query(`TRUNCATE TABLE enrollments, courses RESTART IDENTITY CASCADE;`);
+    // remove enrollments referencing numbered courses, then remove numbered courses
+    await pool.query(`
+      DELETE FROM enrollments
+      WHERE course_id IN (
+        SELECT id FROM courses WHERE title ~* '^course[[:space:]]+[0-9]+$'
+      );
+    `);
+
+    const del = await pool.query(`
+      DELETE FROM courses
+      WHERE title ~* '^course[[:space:]]+[0-9]+$'
+      RETURNING id;
+    `);
+
+    const count = await pool.query(`SELECT COUNT(*)::int AS n FROM courses;`);
+    res.json({ ok: true, deleted_numbered: del.rowCount, total_remaining: count.rows[0].n });
+  } catch (e) {
+    console.error("POST /admin/purge-numbered-courses error:", e);
+    res.status(500).json({ ok: false, error: String(e?.message || e) });
+  }
+});
+
+# ADMIN: import from apps/web/app/courses/courses.data.ts (export const COURSES = [...])
+app.post("/admin/import-web-courses", async (req, res) => {
+  if (!mustBeAdmin(req, res)) return;
+
+  try {
+    await ensureTables();
 
     const repoRoot = path.resolve(__dirname, "..", "..", "..");
     const coursesTs = path.join(repoRoot, "apps", "web", "app", "courses", "courses.data.ts");
@@ -213,6 +258,7 @@ app.post("/admin/replace-web-courses", async (req, res) => {
     }
 
     let inserted = 0;
+    let updated = 0;
 
     for (const c of webCourses) {
       const title = String(c.title || c.name || "").trim();
@@ -231,7 +277,7 @@ app.post("/admin/replace-web-courses", async (req, res) => {
         .digest("hex")
         .replace(/^(.{8})(.{4})(.{4})(.{4})(.{12}).*$/, "$1-$2-$3-$4-$5");
 
-      await pool.query(
+      const r = await pool.query(
         `INSERT INTO courses (id, title, subject, level, language, description, is_free, source)
          VALUES ($1,$2,$3,$4,$5,$6,$7,'import')
          ON CONFLICT (id) DO UPDATE SET
@@ -241,17 +287,19 @@ app.post("/admin/replace-web-courses", async (req, res) => {
            language=EXCLUDED.language,
            description=EXCLUDED.description,
            is_free=EXCLUDED.is_free,
-           source='import';`,
+           source='import'
+         RETURNING (xmax = 0) AS inserted;`,
         [id, title, subject, level, language, description, is_free]
       );
 
-      inserted++;
+      if (r.rows?.[0]?.inserted) inserted++;
+      else updated++;
     }
 
     const count = await pool.query(`SELECT COUNT(*)::int AS n FROM courses;`);
-    res.json({ ok: true, inserted, total: count.rows[0].n });
+    res.json({ ok: true, inserted, updated, total: count.rows[0].n });
   } catch (e) {
-    console.error("POST /admin/replace-web-courses error:", e);
+    console.error("POST /admin/import-web-courses error:", e);
     res.status(500).json({ ok: false, error: String(e?.message || e) });
   }
 });
