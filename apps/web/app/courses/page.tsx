@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { COURSES } from "../courses.data";
+import { COURSES } from "../../courses.data";
 
 export const dynamic = "force-static";
 
