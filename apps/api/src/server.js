@@ -18,13 +18,10 @@ const __dirname = path.dirname(__filename);
 function mustBeAdmin(req, res) {
   const token = process.env.ADMIN_IMPORT_TOKEN;
 
-  // In production we require a token, otherwise anyone could import/overwrite data.
   if (!token && process.env.NODE_ENV === "production") {
     res.status(403).json({ ok: false, error: "ADMIN_IMPORT_TOKEN not set" });
     return false;
   }
-
-  // If no token at all (local/dev), allow.
   if (!token) return true;
 
   const got = req.headers["x-admin-token"] || req.query.token;
@@ -36,17 +33,24 @@ function mustBeAdmin(req, res) {
 }
 
 async function ensureTables() {
+  // courses now includes subject + source
   await pool.query(`
     CREATE TABLE IF NOT EXISTS courses (
       id uuid PRIMARY KEY,
       title text NOT NULL,
+      subject text NOT NULL DEFAULT 'General',
       level text NOT NULL,
       language text NOT NULL,
       description text NOT NULL,
       is_free boolean NOT NULL DEFAULT false,
+      source text NOT NULL DEFAULT 'import',
       created_at timestamptz NOT NULL DEFAULT now()
     );
   `);
+
+  // if table existed before, ensure new columns exist
+  await pool.query(`ALTER TABLE courses ADD COLUMN IF NOT EXISTS subject text NOT NULL DEFAULT 'General';`);
+  await pool.query(`ALTER TABLE courses ADD COLUMN IF NOT EXISTS source text NOT NULL DEFAULT 'import';`);
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS enrollments (
@@ -59,31 +63,81 @@ async function ensureTables() {
   `);
 }
 
-app.get("/health", async (req, res) => {
-  res.json({ ok: true });
+function slugify(s) {
+  return String(s || "")
+    .toLowerCase()
+    .trim()
+    .replace(/&/g, "and")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+app.get("/health", (req, res) => res.json({ ok: true }));
+
+/**
+ * SUBJECTS LIST
+ * GET /subjects
+ */
+app.get("/subjects", async (req, res) => {
+  try {
+    await ensureTables();
+    const r = await pool.query(`
+      SELECT subject, COUNT(*)::int AS count
+      FROM courses
+      GROUP BY subject
+      ORDER BY count DESC, subject ASC;
+    `);
+    res.json({
+      ok: true,
+      subjects: r.rows.map((x) => ({
+        subject: x.subject,
+        slug: slugify(x.subject),
+        count: x.count,
+      })),
+    });
+  } catch (e) {
+    console.error("GET /subjects error:", e);
+    res.status(500).json({ ok: false, error: "db_error" });
+  }
 });
 
+/**
+ * COURSES
+ * GET /courses?limit=200&offset=0&subject=<slug or name>
+ */
 app.get("/courses", async (req, res) => {
   try {
     await ensureTables();
 
     const limitRaw = Number(req.query.limit ?? 200);
     const offsetRaw = Number(req.query.offset ?? 0);
-
     const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 5000) : 200;
     const offset = Number.isFinite(offsetRaw) ? Math.max(offsetRaw, 0) : 0;
 
-    const r = await pool.query(
-      `SELECT id, title, level, language, description, is_free, created_at
-       FROM courses
-       ORDER BY created_at DESC
-       LIMIT $1 OFFSET $2;`,
-      [limit, offset]
+    const subjectQ = String(req.query.subject || "").trim();
+
+    // If subject looks like a slug, match by slugify(subject)
+    let where = "";
+    const params = [limit, offset];
+    if (subjectQ) {
+      where = `WHERE lower(regexp_replace(regexp_replace(subject,'&','and','g'),'[^a-zA-Z0-9]+','-','g')) = $3
+               OR lower(subject) = lower($4)`;
+      params.push(subjectQ.toLowerCase(), subjectQ);
+    }
+
+    const list = await pool.query(
+      `
+      SELECT id, title, subject, level, language, description, is_free, source, created_at
+      FROM courses
+      ${where}
+      ORDER BY created_at DESC
+      LIMIT $1 OFFSET $2;
+      `,
+      params
     );
 
     const count = await pool.query(`SELECT COUNT(*)::int AS n FROM courses;`);
-
-    res.json({ ok: true, courses: r.rows, total: count.rows[0].n, limit, offset });
+    res.json({ ok: true, courses: list.rows, total: count.rows[0].n, limit, offset });
   } catch (e) {
     console.error("GET /courses error:", e);
     res.status(500).json({ ok: false, error: "db_error" });
@@ -92,8 +146,7 @@ app.get("/courses", async (req, res) => {
 
 /**
  * REAL-TIME ENROLL
- * POST /enroll
- * body: { learnerId: string(uuid), courseId: string(uuid) }
+ * POST /enroll  body: { learnerId, courseId }
  */
 app.post("/enroll", async (req, res) => {
   try {
@@ -101,19 +154,15 @@ app.post("/enroll", async (req, res) => {
 
     const learnerId = String(req.body?.learnerId || "");
     const courseId = String(req.body?.courseId || "");
-    if (!learnerId || !courseId) {
-      return res.status(400).json({ ok: false, error: "learnerId and courseId required" });
-    }
+    if (!learnerId || !courseId) return res.status(400).json({ ok: false, error: "learnerId and courseId required" });
 
     const check = await pool.query(`SELECT 1 FROM courses WHERE id=$1`, [courseId]);
-    if (check.rowCount === 0) {
-      return res.status(404).json({ ok: false, error: "course_not_found" });
-    }
+    if (check.rowCount === 0) return res.status(404).json({ ok: false, error: "course_not_found" });
 
     const id = crypto.randomUUID();
     await pool.query(
       `INSERT INTO enrollments (id, learner_id, course_id)
-       VALUES ($1, $2, $3)
+       VALUES ($1,$2,$3)
        ON CONFLICT (learner_id, course_id) DO NOTHING;`,
       [id, learnerId, courseId]
     );
@@ -132,12 +181,12 @@ app.post("/enroll", async (req, res) => {
 app.get("/enrollments", async (req, res) => {
   try {
     await ensureTables();
-
     const learnerId = String(req.query.learnerId || "");
     if (!learnerId) return res.status(400).json({ ok: false, error: "learnerId required" });
 
     const r = await pool.query(
-      `SELECT e.course_id, e.created_at, c.title, c.level, c.language, c.is_free
+      `SELECT e.course_id, e.created_at,
+              c.title, c.subject, c.level, c.language, c.is_free
        FROM enrollments e
        JOIN courses c ON c.id = e.course_id
        WHERE e.learner_id = $1
@@ -153,24 +202,24 @@ app.get("/enrollments", async (req, res) => {
 });
 
 /**
- * IMPORT REAL COURSES FROM apps/web/app/courses/courses.data.ts
- * The file exports: export const COURSES = [...]
- *
- * POST /admin/import-web-courses
- * Header: x-admin-token: <ADMIN_IMPORT_TOKEN>
- * Or: /admin/import-web-courses?token=...
+ * ADMIN: wipe all imported/seeded courses then re-import from web data
+ * POST /admin/replace-web-courses?token=...
  */
-app.post("/admin/import-web-courses", async (req, res) => {
+app.post("/admin/replace-web-courses", async (req, res) => {
   if (!mustBeAdmin(req, res)) return;
 
   try {
     await ensureTables();
 
-    const repoRoot = path.resolve(__dirname, "..", "..", ".."); // apps/api/src -> repo root
+    // wipe courses + enrollments to remove numbered junk permanently
+    await pool.query(`TRUNCATE TABLE enrollments;`);
+    await pool.query(`TRUNCATE TABLE courses;`);
+
+    // import
+    const repoRoot = path.resolve(__dirname, "..", "..", "..");
     const coursesTs = path.join(repoRoot, "apps", "web", "app", "courses", "courses.data.ts");
 
     const source = await fs.readFile(coursesTs, "utf8");
-
     const transformed = await esbuild.transform(source, {
       loader: "ts",
       format: "esm",
@@ -181,72 +230,61 @@ app.post("/admin/import-web-courses", async (req, res) => {
     const dataUrl = `data:text/javascript;base64,${Buffer.from(transformed.code).toString("base64")}`;
     const mod = await import(dataUrl);
 
-    // ✅ FIX: your file exports COURSES
-    const webCourses = mod.COURSES || mod.courses || mod.default || [];
-
+    // ✅ your file exports COURSES
+    const webCourses = mod.COURSES || [];
     if (!Array.isArray(webCourses) || webCourses.length === 0) {
-      return res.status(400).json({
-        ok: false,
-        error: "Could not read exported courses array",
-        hint: "Expected `export const COURSES = [...]` in apps/web/app/courses/courses.data.ts",
-        exportedKeys: Object.keys(mod || {}),
-      });
+      return res.status(400).json({ ok: false, error: "Expected export const COURSES = [...]" });
     }
 
     let inserted = 0;
-    let updated = 0;
 
     for (const c of webCourses) {
       const title = String(c.title || c.name || "").trim();
-      const description = String(c.summary || c.description || "").trim() || "No description";
-      const level = String(c.level || c.difficulty || "beginner").trim().toLowerCase();
-      const language = String(c.language || "en").trim().toLowerCase();
-      const is_free = Boolean(c.is_free ?? c.free ?? false);
-
       if (!title) continue;
 
-      const stableKey = `${title}::${String(c.track || "")}`;
+      // SUBJECT: prefer explicit subject/category; fallback to track
+      const subject =
+        String(c.subject || c.category || c.area || c.track || "General").trim() || "General";
+
+      const description = String(c.summary || c.description || "").trim() || "No description";
+      const level = String(c.level || c.difficulty || "beginner").trim().toLowerCase() || "beginner";
+      const language = String(c.language || "en").trim().toLowerCase() || "en";
+      const is_free = Boolean(c.is_free ?? c.free ?? false);
+
+      // stable UUID from title+subject
+      const stableKey = `${title}::${subject}`;
       const id = crypto
         .createHash("sha1")
         .update(stableKey)
         .digest("hex")
         .replace(/^(.{8})(.{4})(.{4})(.{4})(.{12}).*$/, "$1-$2-$3-$4-$5");
 
-      const r = await pool.query(
-        `INSERT INTO courses (id, title, level, language, description, is_free)
-         VALUES ($1, $2, $3, $4, $5, $6)
+      await pool.query(
+        `INSERT INTO courses (id, title, subject, level, language, description, is_free, source)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,'import')
          ON CONFLICT (id) DO UPDATE SET
-           title = EXCLUDED.title,
-           level = EXCLUDED.level,
-           language = EXCLUDED.language,
-           description = EXCLUDED.description,
-           is_free = EXCLUDED.is_free
-         RETURNING (xmax = 0) AS inserted;`,
-        [id, title, level || "beginner", language || "en", description, is_free]
+           title=EXCLUDED.title,
+           subject=EXCLUDED.subject,
+           level=EXCLUDED.level,
+           language=EXCLUDED.language,
+           description=EXCLUDED.description,
+           is_free=EXCLUDED.is_free,
+           source='import';`,
+        [id, title, subject, level, language, description, is_free]
       );
 
-      if (r.rows?.[0]?.inserted) inserted++;
-      else updated++;
+      inserted++;
     }
 
     const count = await pool.query(`SELECT COUNT(*)::int AS n FROM courses;`);
-
-    res.json({
-      ok: true,
-      imported_from: coursesTs,
-      inserted,
-      updated,
-      total: count.rows[0].n,
-    });
+    res.json({ ok: true, inserted, total: count.rows[0].n });
   } catch (e) {
-    console.error("POST /admin/import-web-courses error:", e);
+    console.error("POST /admin/replace-web-courses error:", e);
     res.status(500).json({ ok: false, error: String(e?.message || e) });
   }
 });
 
-app.use((req, res) => {
-  res.status(404).json({ ok: false, error: "Not found" });
-});
+app.use((req, res) => res.status(404).json({ ok: false, error: "Not found" }));
 
 const port = process.env.PORT || 10000;
 app.listen(port, () => console.log(`API listening on ${port}`));
