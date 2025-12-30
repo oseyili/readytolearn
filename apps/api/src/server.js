@@ -33,7 +33,6 @@ function mustBeAdmin(req, res) {
 }
 
 async function ensureTables() {
-  // courses now includes subject + source
   await pool.query(`
     CREATE TABLE IF NOT EXISTS courses (
       id uuid PRIMARY KEY,
@@ -48,7 +47,6 @@ async function ensureTables() {
     );
   `);
 
-  // if table existed before, ensure new columns exist
   await pool.query(`ALTER TABLE courses ADD COLUMN IF NOT EXISTS subject text NOT NULL DEFAULT 'General';`);
   await pool.query(`ALTER TABLE courses ADD COLUMN IF NOT EXISTS source text NOT NULL DEFAULT 'import';`);
 
@@ -74,10 +72,6 @@ function slugify(s) {
 
 app.get("/health", (req, res) => res.json({ ok: true }));
 
-/**
- * SUBJECTS LIST
- * GET /subjects
- */
 app.get("/subjects", async (req, res) => {
   try {
     await ensureTables();
@@ -87,6 +81,7 @@ app.get("/subjects", async (req, res) => {
       GROUP BY subject
       ORDER BY count DESC, subject ASC;
     `);
+
     res.json({
       ok: true,
       subjects: r.rows.map((x) => ({
@@ -101,10 +96,6 @@ app.get("/subjects", async (req, res) => {
   }
 });
 
-/**
- * COURSES
- * GET /courses?limit=200&offset=0&subject=<slug or name>
- */
 app.get("/courses", async (req, res) => {
   try {
     await ensureTables();
@@ -116,12 +107,13 @@ app.get("/courses", async (req, res) => {
 
     const subjectQ = String(req.query.subject || "").trim();
 
-    // If subject looks like a slug, match by slugify(subject)
     let where = "";
     const params = [limit, offset];
     if (subjectQ) {
-      where = `WHERE lower(regexp_replace(regexp_replace(subject,'&','and','g'),'[^a-zA-Z0-9]+','-','g')) = $3
-               OR lower(subject) = lower($4)`;
+      where = `
+        WHERE lower(regexp_replace(regexp_replace(subject,'&','and','g'),'[^a-zA-Z0-9]+','-','g')) = $3
+           OR lower(subject) = lower($4)
+      `;
       params.push(subjectQ.toLowerCase(), subjectQ);
     }
 
@@ -144,10 +136,6 @@ app.get("/courses", async (req, res) => {
   }
 });
 
-/**
- * REAL-TIME ENROLL
- * POST /enroll  body: { learnerId, courseId }
- */
 app.post("/enroll", async (req, res) => {
   try {
     await ensureTables();
@@ -174,10 +162,6 @@ app.post("/enroll", async (req, res) => {
   }
 });
 
-/**
- * LIST ENROLLMENTS
- * GET /enrollments?learnerId=<uuid>
- */
 app.get("/enrollments", async (req, res) => {
   try {
     await ensureTables();
@@ -201,21 +185,14 @@ app.get("/enrollments", async (req, res) => {
   }
 });
 
-/**
- * ADMIN: wipe all imported/seeded courses then re-import from web data
- * POST /admin/replace-web-courses?token=...
- */
 app.post("/admin/replace-web-courses", async (req, res) => {
   if (!mustBeAdmin(req, res)) return;
 
   try {
     await ensureTables();
 
-    // wipe courses + enrollments to remove numbered junk permanently
-    await pool.query(`TRUNCATE TABLE enrollments;`);
-    await pool.query(`TRUNCATE TABLE courses;`);
+    await pool.query(`TRUNCATE TABLE enrollments, courses RESTART IDENTITY CASCADE;`);
 
-    // import
     const repoRoot = path.resolve(__dirname, "..", "..", "..");
     const coursesTs = path.join(repoRoot, "apps", "web", "app", "courses", "courses.data.ts");
 
@@ -230,7 +207,6 @@ app.post("/admin/replace-web-courses", async (req, res) => {
     const dataUrl = `data:text/javascript;base64,${Buffer.from(transformed.code).toString("base64")}`;
     const mod = await import(dataUrl);
 
-    // ✅ your file exports COURSES
     const webCourses = mod.COURSES || [];
     if (!Array.isArray(webCourses) || webCourses.length === 0) {
       return res.status(400).json({ ok: false, error: "Expected export const COURSES = [...]" });
@@ -242,16 +218,12 @@ app.post("/admin/replace-web-courses", async (req, res) => {
       const title = String(c.title || c.name || "").trim();
       if (!title) continue;
 
-      // SUBJECT: prefer explicit subject/category; fallback to track
-      const subject =
-        String(c.subject || c.category || c.area || c.track || "General").trim() || "General";
-
+      const subject = String(c.subject || c.category || c.area || c.track || "General").trim() || "General";
       const description = String(c.summary || c.description || "").trim() || "No description";
       const level = String(c.level || c.difficulty || "beginner").trim().toLowerCase() || "beginner";
       const language = String(c.language || "en").trim().toLowerCase() || "en";
       const is_free = Boolean(c.is_free ?? c.free ?? false);
 
-      // stable UUID from title+subject
       const stableKey = `${title}::${subject}`;
       const id = crypto
         .createHash("sha1")
