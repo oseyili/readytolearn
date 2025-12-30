@@ -1,14 +1,18 @@
-﻿{
+{
   "name": "@readytolearn/api",
   "private": true,
-  "type": "commonjs",
+  "type": "module",
   "scripts": {
     "dev": "node src/index.js",
-    "start": "node src/index.js"
+    "start": "node src/server.js"
   },
   "dependencies": {
-    "express": "^4.22.1",
     "cors": "^2.8.5",
+    "express": "^4.22.1",
     "stripe": "^14.0.0"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6"
   }
 }
