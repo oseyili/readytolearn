@@ -1,6 +1,6 @@
 import "server-only";
 import { cache } from "react";
-import { COURSES } from "./courses.data";
+import { COURSES } from './courses.data';
 
 type Course = any;
 
