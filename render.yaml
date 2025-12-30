@@ -1,7 +1,4 @@
 ﻿services:
-  # ======================
-  # WEB — STATIC ONLY
-  # ======================
   - type: web
     name: readytolearn-web
     runtime: static
@@ -14,16 +11,12 @@
       - key: NODE_VERSION
         value: "20"
 
-  # ======================
-  # API — NODE SERVER
-  # ======================
   - type: web
     name: readytolearn-api
     runtime: node
     buildCommand: |
       corepack enable
       pnpm install --frozen-lockfile
-      pnpm -C apps/api build
     startCommand: pnpm -C apps/api start
     envVars:
       - key: NODE_VERSION
