@@ -1,81 +1,70 @@
-import Link from "next/link";
-import { COURSES } from './courses.data';
+import { Suspense } from "react";
+import type { Role } from "@readytolearn/ui";
 
-export const dynamic = "force-static";
+// Fallback static data (your existing thousands)
+import { courses as fallbackCourses } from "./courses.data";
 
-export default function CoursesPage({
-  searchParams,
-}: {
-  searchParams?: Record<string, string | string[] | undefined>;
-}) {
-  const PAGE_SIZE = 24;
+type ApiCourse = {
+  id: string;
+  title: string;
+  level: string;
+  language: string;
+  description: string;
+  is_free: boolean;
+  created_at: string;
+};
 
-  const qRaw = typeof searchParams?.q === "string" ? searchParams.q : "";
-  const pageRaw = typeof searchParams?.page === "string" ? searchParams.page : "1";
+async function loadCourses(): Promise<ApiCourse[]> {
+  const base = process.env.NEXT_PUBLIC_API_URL || "https://readytolearn-api.onrender.com";
 
-  const q = qRaw.toLowerCase().trim();
-  const page = Math.max(1, parseInt(pageRaw, 10) || 1);
-
-  let results: any[] = COURSES as any[];
-
-  if (q) {
-    results = results.filter((c) =>
-      `${c.title ?? ""} ${c.summary ?? ""}`.toLowerCase().includes(q)
-    );
+  try {
+    const res = await fetch(`${base}/courses`, { cache: "no-store" });
+    if (!res.ok) throw new Error("bad_response");
+    const data = await res.json();
+    if (data?.ok && Array.isArray(data.courses)) return data.courses;
+    throw new Error("bad_payload");
+  } catch {
+    // If API is down, show your static thousands instead
+    return (fallbackCourses as any) ?? [];
   }
+}
 
-  const total = results.length;
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-  const safePage = Math.min(page, totalPages);
-
-  const items = results.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
-
-  const href = (p: number) => {
-    const params = new URLSearchParams();
-    if (qRaw) params.set("q", qRaw);
-    if (p > 1) params.set("page", String(p));
-    const s = params.toString();
-    return s ? `/courses?${s}` : "/courses";
-  };
+async function CoursesList() {
+  const courses = await loadCourses();
 
   return (
-    <main className="card">
-      <div className="h1">Courses</div>
-      <div className="muted">
-        {total.toLocaleString()} courses • Page {safePage} / {totalPages}
-      </div>
+    <div style={{ padding: 24 }}>
+      <h1 style={{ fontSize: 28, fontWeight: 700 }}>Courses</h1>
+      <p style={{ opacity: 0.8, marginTop: 6 }}>
+        Showing {courses.length} courses
+      </p>
 
-      <form style={{ marginTop: 12, display: "flex", gap: 8, flexWrap: "wrap" }}>
-        <input name="q" placeholder="Search courses…" defaultValue={qRaw} />
-        <button className="btn primary" type="submit">Search</button>
-        <Link className="btn" href="/courses">Reset</Link>
-      </form>
-
-      <div style={{ marginTop: 16, display: "grid", gap: 12 }}>
-        {items.map((c) => (
-          <div key={String(c.id ?? c.slug)} className="card" style={{ padding: 14 }}>
-            <div style={{ fontWeight: 800 }}>{String(c.title ?? "Untitled")}</div>
-            <div className="muted">{String(c.summary ?? "")}</div>
-            <div className="muted" style={{ marginTop: 6 }}>
-              Track: {String(c.track ?? "n/a")} • Level: {String(c.level ?? "n/a")} •{" "}
-              {String(c.minutes ?? "n/a")} min
+      <div style={{ marginTop: 18, display: "grid", gap: 12 }}>
+        {courses.map((c: any) => (
+          <div
+            key={c.id ?? c.slug ?? c.title}
+            style={{ border: "1px solid #ddd", borderRadius: 10, padding: 14 }}
+          >
+            <div style={{ fontWeight: 700 }}>{c.title}</div>
+            <div style={{ opacity: 0.8, marginTop: 4 }}>
+              {c.level ?? c.difficulty ?? "—"} • {c.language ?? "en"} •{" "}
+              {c.is_free === true ? "Free" : c.is_free === false ? "Paid" : ""}
             </div>
+            {c.description ? (
+              <div style={{ marginTop: 8 }}>{c.description}</div>
+            ) : null}
           </div>
         ))}
       </div>
+    </div>
+  );
+}
 
-      <div style={{ display: "flex", justifyContent: "space-between", marginTop: 16 }}>
-        <Link className="btn" href={href(Math.max(1, safePage - 1))} aria-disabled={safePage === 1}>
-          Prev
-        </Link>
-        <div className="muted">
-          Showing {(safePage - 1) * PAGE_SIZE + 1}–{Math.min(safePage * PAGE_SIZE, total)} of{" "}
-          {total.toLocaleString()}
-        </div>
-        <Link className="btn" href={href(Math.min(totalPages, safePage + 1))} aria-disabled={safePage === totalPages}>
-          Next
-        </Link>
-      </div>
-    </main>
+export default function Page() {
+  return (
+    <Suspense fallback={<div style={{ padding: 24 }}>Loading courses…</div>}>
+      {/* @ts-expect-error Async Server Component */}
+      <CoursesList />
+    </Suspense>
   );
 }
