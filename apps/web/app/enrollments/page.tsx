@@ -11,15 +11,17 @@ type Enrollment = {
   is_free: boolean;
 };
 
-function getOrCreateLearnerId() {
+function getOrCreateLearnerId(): string {
   const key = "rtl_learner_id";
-  let v = localStorage.getItem(key);
-  if (!v) {
-    v =
-      (globalThis.crypto as any)?.randomUUID?.() ??
-      `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-    localStorage.setItem(key, v);
-  }
+  const existing = localStorage.getItem(key);
+  if (existing && typeof existing === "string") return existing;
+
+  const generated =
+    (globalThis.crypto as any)?.randomUUID?.() ??
+    `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+  const v = String(generated); // ✅ always string
+  localStorage.setItem(key, v);
   return v;
 }
 
