@@ -20,7 +20,10 @@ function Card({ accent, children }:{ accent:string; children:React.ReactNode }) 
 }
 
 export default function SubjectsPortal() {
-  const apiBase = useMemo(() => process.env.NEXT_PUBLIC_API_URL || "https://readytolearn-api.onrender.com", []);
+  const apiBase = useMemo(
+    () => process.env.NEXT_PUBLIC_API_URL || "https://readytolearn-api.onrender.com",
+    []
+  );
   const [items,setItems] = useState<SubjectRow[]>([]);
   const [loading,setLoading] = useState(true);
   const [err,setErr] = useState<string|null>(null);
@@ -46,7 +49,7 @@ export default function SubjectsPortal() {
       <div style={{ display:"flex", justifyContent:"space-between", gap:12, flexWrap:"wrap" }}>
         <div>
           <h1 style={{ margin:0, fontSize:34, fontWeight:900, letterSpacing:-.5 }}>Master Subjects Portal</h1>
-          <div style={{ marginTop:8, opacity:.75 }}>Unique subjects. Color-coded. Professional layout.</div>
+          <div style={{ marginTop:8, opacity:.75 }}>Unique subjects. Color-coded.</div>
         </div>
         <div style={{ display:"flex", gap:10, flexWrap:"wrap" }}>
           <a href="/courses" style={{ textDecoration:"none" }}>
