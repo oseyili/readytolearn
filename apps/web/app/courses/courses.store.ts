@@ -1,55 +1,93 @@
-import "server-only";
-import { cache } from "react";
-import { COURSES } from './courses.data';
+import { useState } from "react";
 
-type Course = any;
+/* ---------- helpers ---------- */
+function errMsg(e: unknown): string {
+  if (e instanceof Error) return e.message;
+  if (typeof e === "string") return e;
+  return "Unknown error";
+}
 
-type IndexedCourse = Course & {
-  __track: string;
-  __level: string;
-  __text: string; // prebuilt searchable blob
-};
+/* ---------- component ---------- */
+export default function Courses() {
+  const apiBase = import.meta.env.VITE_API_BASE;
 
-const INDEX: IndexedCourse[] = (COURSES as Course[]).map((c) => {
-  const title = String(c.title ?? "");
-  const summary = String(c.summary ?? "");
-  const skills = Array.isArray(c.skills) ? c.skills.join(" ") : "";
-  return {
-    ...c,
-    __track: String(c.track ?? "").toLowerCase().trim(),
-    __level: String(c.level ?? "").toLowerCase().trim(),
-    __text: (title + " " + summary + " " + skills).toLowerCase(),
-  };
-});
+  const [q, setQ] = useState("");
+  const [items, setItems] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
 
-// Memoized query function (reused across requests in the same server process)
-export const queryCourses = cache(function queryCourses(input: {
-  q?: string;
-  track?: string;
-  level?: string;
-  page?: number;
-  pageSize?: number;
-}) {
-  const pageSize = input.pageSize ?? 24;
-  const q = (input.q ?? "").toLowerCase().trim();
-  const track = (input.track ?? "").toLowerCase().trim();
-  const level = (input.level ?? "").toLowerCase().trim();
-  const page = Math.max(1, input.page ?? 1);
+  async function enroll(courseId: string) {
+    try {
+      setMsg(null);
 
-  let filtered = INDEX;
+      const learnerId = getOrCreateLearnerId();
 
-  if (track) filtered = filtered.filter((c) => c.__track === track);
-  if (level) filtered = filtered.filter((c) => c.__level === level);
-  if (q) filtered = filtered.filter((c) => c.__text.includes(q));
+      const r = await fetch(`${apiBase}/enroll`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ learnerId, courseId }),
+      });
 
-  const total = filtered.length;
-  const totalPages = Math.max(1, Math.ceil(total / pageSize));
-  const safePage = Math.min(page, totalPages);
+      const j = await r.json().catch(() => ({} as any));
 
-  const items = filtered.slice((safePage - 1) * pageSize, safePage * pageSize);
+      if (!r.ok || !j?.ok) {
+        throw new Error(j?.error || `HTTP ${r.status}`);
+      }
 
-  // Strip internal fields so you don’t accidentally render them
-  const cleanItems = items.map(({ __track, __level, __text, ...rest }) => rest);
+      setMsg("✅ Enrolled successfully");
+      setTimeout(() => setMsg(null), 3000);
+    } catch (e: unknown) {
+      setMsg(`❌ Enroll failed: ${errMsg(e)}`);
+      setTimeout(() => setMsg(null), 5000);
+    }
+  }
 
-  return { items: cleanItems, total, totalPages, safePage, pageSize };
-});
+  async function pay(courseId: string) {
+    try {
+      setMsg(null);
+
+      const learnerId = getOrCreateLearnerId();
+
+      const r = await fetch(`${apiBase}/payments/create-checkout`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ learnerId, courseId }),
+      });
+
+      const j = await r.json().catch(() => ({} as any));
+
+      if (!r.ok || !j?.ok) {
+        throw new Error(j?.error || `HTTP ${r.status}`);
+      }
+
+      if (typeof j.url !== "string") {
+        throw new Error("Missing checkout URL");
+      }
+
+      window.location.assign(j.url);
+    } catch (e: unknown) {
+      setMsg(`❌ Payment failed: ${errMsg(e)}`);
+      setTimeout(() => setMsg(null), 6000);
+    }
+  }
+
+  return (
+    <div style={{ maxWidth: 1150, margin: "0 auto", padding: "28px 16px 60px" }}>
+      <h1>Courses</h1>
+
+      <input
+        value={q}
+        onChange={(e) => setQ(e.target.value)}
+        placeholder="Search…"
+      />
+
+      <div style={{ marginTop: 10 }}>
+        {loading && <span>Loading…</span>}
+        {!loading && <span>Showing <b>{items.length}</b></span>}
+        {err && <span style={{ color: "crimson" }}>Error: {err}</span>}
+        {msg && <span style={{ fontWeight: 900 }}>{msg}</span>}
+      </div>
+    </div>
+  );
+}
