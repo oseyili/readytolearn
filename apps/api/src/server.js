@@ -201,8 +201,7 @@ app.get("/enrollments", async (req, res) => {
     res.status(500).json({ ok: false, error: "db_error" });
   }
 });
-
-# ADMIN: delete ONLY the numbered junk courses (keeps real ones)
+// ADMIN: delete ONLY the numbered junk courses (keeps real ones)
 app.post("/admin/purge-numbered-courses", async (req, res) => {
   if (!mustBeAdmin(req, res)) return;
 
@@ -230,8 +229,7 @@ app.post("/admin/purge-numbered-courses", async (req, res) => {
     res.status(500).json({ ok: false, error: String(e?.message || e) });
   }
 });
-
-# ADMIN: import from apps/web/app/courses/courses.data.ts (export const COURSES = [...])
+// ADMIN: import from apps/web/app/courses/courses.data.ts (export const COURSES = [...])
 app.post("/admin/import-web-courses", async (req, res) => {
   if (!mustBeAdmin(req, res)) return;
 
@@ -308,3 +306,4 @@ app.use((req, res) => res.status(404).json({ ok: false, error: "Not found" }));
 
 const port = process.env.PORT || 10000;
 app.listen(port, () => console.log(`API listening on ${port}`));
+
