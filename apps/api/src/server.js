@@ -7,6 +7,7 @@ import { fileURLToPath } from "url";
 
 import { pool } from "./db/pool.js";
 import * as esbuild from "esbuild";
+import Stripe from "stripe";
 
 const app = express();
 app.use(cors());
@@ -15,10 +16,12 @@ app.use(express.json({ limit: "10mb" }));
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+const stripeSecret = process.env.STRIPE_SECRET_KEY || "";
+const stripe = stripeSecret ? new Stripe(stripeSecret, { apiVersion: "2023-10-16" }) : null;
+
 function mustBeAdmin(req, res) {
   const token = process.env.ADMIN_IMPORT_TOKEN;
 
-  // production must have a token
   if (!token && process.env.NODE_ENV === "production") {
     res.status(403).json({ ok: false, error: "ADMIN_IMPORT_TOKEN not set" });
     return false;
@@ -33,12 +36,65 @@ function mustBeAdmin(req, res) {
   return true;
 }
 
+function normText(s) {
+  return String(s || "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function normKey(s) {
+  return normText(s).toLowerCase();
+}
+
+function slugify(s) {
+  return normKey(s)
+    .replace(/&/g, "and")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function stableUuidFromKey(key) {
+  // deterministic UUID-like from sha1 (good enough for stable IDs)
+  return crypto
+    .createHash("sha1")
+    .update(key)
+    .digest("hex")
+    .replace(/^(.{8})(.{4})(.{4})(.{4})(.{12}).*$/, "$1-$2-$3-$4-$5");
+}
+
+// Track -> master subject area mapping (edit anytime; no duplicates, professional taxonomy)
+function mapToMasterSubject(course) {
+  const track = normKey(course?.track || course?.subject || course?.category || course?.area || "");
+  const title = normKey(course?.title || course?.name || "");
+
+  const rules = [
+    { subject: "Digital Foundations", match: ["digital", "computer", "literacy", "internet", "email"] },
+    { subject: "AI & Data", match: ["ai", "data", "machine", "analytics"] },
+    { subject: "Math", match: ["algebra", "math", "numeracy", "calculus"] },
+    { subject: "Business & Career", match: ["career", "internship", "customer-support", "support", "work", "employ", "cv", "interview"] },
+    { subject: "Software & Coding", match: ["code", "program", "developer", "javascript", "python", "web-dev"] },
+    { subject: "Finance", match: ["finance", "account", "budget", "invest"] },
+    { subject: "Health & Wellbeing", match: ["health", "wellbeing", "mental"] },
+    { subject: "Language & Communication", match: ["english", "writing", "communication", "language"] },
+  ];
+
+  const hay = `${track} ${title}`;
+  for (const r of rules) {
+    if (r.match.some((m) => hay.includes(m))) return r.subject;
+  }
+
+  // fallback: if a track exists, use a cleaned version, else General
+  const fallback = normText(course?.track || course?.subject || course?.category || "");
+  return fallback ? fallback : "General";
+}
+
 async function ensureTables() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS courses (
       id uuid PRIMARY KEY,
       title text NOT NULL,
-      subject text NOT NULL DEFAULT 'General',
+      subject text NOT NULL,
+      subject_slug text NOT NULL,
       level text NOT NULL,
       language text NOT NULL,
       description text NOT NULL,
@@ -48,27 +104,20 @@ async function ensureTables() {
     );
   `);
 
-  await pool.query(`ALTER TABLE courses ADD COLUMN IF NOT EXISTS subject text NOT NULL DEFAULT 'General';`);
-  await pool.query(`ALTER TABLE courses ADD COLUMN IF NOT EXISTS source text NOT NULL DEFAULT 'import';`);
+  await pool.query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS courses_unique_key
+    ON courses (lower(title), lower(subject));
+  `);
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS enrollments (
       id uuid PRIMARY KEY,
-      learner_id uuid NOT NULL,
+      learner_id text NOT NULL,
       course_id uuid NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
       created_at timestamptz NOT NULL DEFAULT now(),
       UNIQUE (learner_id, course_id)
     );
   `);
-}
-
-function slugify(s) {
-  return String(s || "")
-    .toLowerCase()
-    .trim()
-    .replace(/&/g, "and")
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
 }
 
 app.get("/health", (req, res) => res.json({ ok: true }));
@@ -77,24 +126,22 @@ app.get("/subjects", async (req, res) => {
   try {
     await ensureTables();
     const r = await pool.query(`
-      SELECT subject, COUNT(*)::int AS count
+      SELECT subject, subject_slug, COUNT(*)::int AS count
       FROM courses
-      GROUP BY subject
+      GROUP BY subject, subject_slug
       ORDER BY count DESC, subject ASC;
     `);
 
-    // de-duplicate by subject in case of whitespace/case differences
-    const map = new Map();
+    // Ensure no repeats by slug
+    const bySlug = new Map();
     for (const row of r.rows) {
-      const key = String(row.subject || "General").trim();
-      const prev = map.get(key);
-      map.set(key, (prev || 0) + Number(row.count || 0));
+      const slug = row.subject_slug;
+      const prev = bySlug.get(slug);
+      if (!prev) bySlug.set(slug, { subject: row.subject, slug, count: row.count });
+      else prev.count += row.count;
     }
 
-    const subjects = Array.from(map.entries())
-      .map(([subject, count]) => ({ subject, count, slug: slugify(subject) }))
-      .sort((a, b) => b.count - a.count || a.subject.localeCompare(b.subject));
-
+    const subjects = Array.from(bySlug.values()).sort((a, b) => b.count - a.count || a.subject.localeCompare(b.subject));
     res.json({ ok: true, subjects });
   } catch (e) {
     console.error("GET /subjects error:", e);
@@ -106,47 +153,44 @@ app.get("/courses", async (req, res) => {
   try {
     await ensureTables();
 
-    const limitRaw = Number(req.query.limit ?? 200);
+    const limitRaw = Number(req.query.limit ?? 60);
     const offsetRaw = Number(req.query.offset ?? 0);
-    const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 5000) : 200;
+    const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 200) : 60;
     const offset = Number.isFinite(offsetRaw) ? Math.max(offsetRaw, 0) : 0;
 
-    const subjectQ = String(req.query.subject || "").trim();
-    const searchQ = String(req.query.q || "").trim();
+    const subjectSlug = normText(req.query.subject || "");
+    const q = normText(req.query.q || "");
 
     const where = [];
     const params = [];
     let i = 1;
 
-    if (subjectQ) {
-      where.push(`(lower(regexp_replace(regexp_replace(subject,'&','and','g'),'[^a-zA-Z0-9]+','-','g')) = lower($${i}) OR lower(subject)=lower($${i+1}))`);
-      params.push(subjectQ, subjectQ);
-      i += 2;
+    if (subjectSlug) {
+      where.push(`subject_slug = $${i++}`);
+      params.push(subjectSlug);
     }
-
-    if (searchQ) {
-      where.push(`(title ILIKE $${i} OR description ILIKE $${i+1} OR subject ILIKE $${i+2})`);
-      params.push(`%${searchQ}%`, `%${searchQ}%`, `%${searchQ}%`);
-      i += 3;
+    if (q) {
+      where.push(`(title ILIKE $${i} OR description ILIKE $${i} OR subject ILIKE $${i})`);
+      params.push(`%${q}%`);
+      i++;
     }
 
     params.push(limit, offset);
-
     const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
 
     const list = await pool.query(
       `
-      SELECT id, title, subject, level, language, description, is_free, source, created_at
+      SELECT id, title, subject, subject_slug, level, language, description, is_free, created_at
       FROM courses
       ${whereSql}
       ORDER BY created_at DESC
-      LIMIT $${i} OFFSET $${i+1};
+      LIMIT $${i++} OFFSET $${i++};
       `,
       params
     );
 
-    const count = await pool.query(`SELECT COUNT(*)::int AS n FROM courses;`);
-    res.json({ ok: true, courses: list.rows, total: count.rows[0].n, limit, offset });
+    const total = await pool.query(`SELECT COUNT(*)::int AS n FROM courses;`);
+    res.json({ ok: true, courses: list.rows, total: total.rows[0].n, limit, offset });
   } catch (e) {
     console.error("GET /courses error:", e);
     res.status(500).json({ ok: false, error: "db_error" });
@@ -156,20 +200,18 @@ app.get("/courses", async (req, res) => {
 app.post("/enroll", async (req, res) => {
   try {
     await ensureTables();
-
-    const learnerId = String(req.body?.learnerId || "");
-    const courseId = String(req.body?.courseId || "");
+    const learnerId = normText(req.body?.learnerId || "");
+    const courseId = normText(req.body?.courseId || "");
     if (!learnerId || !courseId) return res.status(400).json({ ok: false, error: "learnerId and courseId required" });
 
     const check = await pool.query(`SELECT 1 FROM courses WHERE id=$1`, [courseId]);
     if (check.rowCount === 0) return res.status(404).json({ ok: false, error: "course_not_found" });
 
-    const id = crypto.randomUUID();
     await pool.query(
       `INSERT INTO enrollments (id, learner_id, course_id)
        VALUES ($1,$2,$3)
        ON CONFLICT (learner_id, course_id) DO NOTHING;`,
-      [id, learnerId, courseId]
+      [crypto.randomUUID(), learnerId, courseId]
     );
 
     res.json({ ok: true });
@@ -182,12 +224,11 @@ app.post("/enroll", async (req, res) => {
 app.get("/enrollments", async (req, res) => {
   try {
     await ensureTables();
-    const learnerId = String(req.query.learnerId || "");
+    const learnerId = normText(req.query.learnerId || "");
     if (!learnerId) return res.status(400).json({ ok: false, error: "learnerId required" });
 
     const r = await pool.query(
-      `SELECT e.course_id, e.created_at,
-              c.title, c.subject, c.level, c.language, c.is_free
+      `SELECT e.course_id, e.created_at, c.title, c.subject, c.subject_slug, c.level, c.language, c.is_free
        FROM enrollments e
        JOIN courses c ON c.id = e.course_id
        WHERE e.learner_id = $1
@@ -201,103 +242,117 @@ app.get("/enrollments", async (req, res) => {
     res.status(500).json({ ok: false, error: "db_error" });
   }
 });
-// ADMIN: delete ONLY the numbered junk courses (keeps real ones)
-app.post("/admin/purge-numbered-courses", async (req, res) => {
-  if (!mustBeAdmin(req, res)) return;
 
+// --------- PAYMENTS (Stripe Checkout) ---------
+app.post("/payments/create-checkout", async (req, res) => {
   try {
+    if (!stripe) return res.status(500).json({ ok: false, error: "STRIPE_SECRET_KEY not set" });
     await ensureTables();
 
-    // remove enrollments referencing numbered courses, then remove numbered courses
-    await pool.query(`
-      DELETE FROM enrollments
-      WHERE course_id IN (
-        SELECT id FROM courses WHERE title ~* '^course[[:space:]]+[0-9]+$'
-      );
-    `);
+    const learnerId = normText(req.body?.learnerId || "");
+    const courseId = normText(req.body?.courseId || "");
+    if (!learnerId || !courseId) return res.status(400).json({ ok: false, error: "learnerId and courseId required" });
 
-    const del = await pool.query(`
-      DELETE FROM courses
-      WHERE title ~* '^course[[:space:]]+[0-9]+$'
-      RETURNING id;
-    `);
+    const course = await pool.query(`SELECT id, title, is_free FROM courses WHERE id=$1`, [courseId]);
+    if (course.rowCount === 0) return res.status(404).json({ ok: false, error: "course_not_found" });
+    if (course.rows[0].is_free) return res.status(400).json({ ok: false, error: "course_is_free" });
 
-    const count = await pool.query(`SELECT COUNT(*)::int AS n FROM courses;`);
-    res.json({ ok: true, deleted_numbered: del.rowCount, total_remaining: count.rows[0].n });
+    const webBase = process.env.WEB_BASE_URL || "https://readytolearn-web.onrender.com";
+    const title = course.rows[0].title;
+
+    // Default: £9.99 (editable later)
+    const session = await stripe.checkout.sessions.create({
+      mode: "payment",
+      payment_method_types: ["card"],
+      line_items: [
+        {
+          price_data: {
+            currency: "gbp",
+            product_data: { name: title },
+            unit_amount: 999,
+          },
+          quantity: 1,
+        },
+      ],
+      success_url: `${webBase}/payments/success?courseId=${encodeURIComponent(courseId)}&learnerId=${encodeURIComponent(learnerId)}`,
+      cancel_url: `${webBase}/payments/cancel`,
+      metadata: { courseId, learnerId },
+    });
+
+    res.json({ ok: true, url: session.url });
   } catch (e) {
-    console.error("POST /admin/purge-numbered-courses error:", e);
+    console.error("POST /payments/create-checkout error:", e);
     res.status(500).json({ ok: false, error: String(e?.message || e) });
   }
 });
-// ADMIN: import from apps/web/app/courses/courses.data.ts (export const COURSES = [...])
-app.post("/admin/import-web-courses", async (req, res) => {
+
+// --------- ADMIN: Replace + import (NO DUPLICATES EVER) ---------
+async function loadWebCoursesArray() {
+  const repoRoot = path.resolve(__dirname, "..", "..", "..");
+  const coursesTs = path.join(repoRoot, "apps", "web", "app", "courses", "courses.data.ts");
+  const source = await fs.readFile(coursesTs, "utf8");
+
+  const transformed = await esbuild.transform(source, {
+    loader: "ts",
+    format: "esm",
+    target: "es2022",
+    sourcemap: false,
+  });
+
+  const dataUrl = `data:text/javascript;base64,${Buffer.from(transformed.code).toString("base64")}`;
+  const mod = await import(dataUrl);
+  const arr = mod.COURSES || mod.default || [];
+  if (!Array.isArray(arr) || arr.length === 0) throw new Error("Expected export const COURSES = [...]");
+  return arr;
+}
+
+app.post("/admin/replace-web-courses", async (req, res) => {
   if (!mustBeAdmin(req, res)) return;
 
   try {
     await ensureTables();
 
-    const repoRoot = path.resolve(__dirname, "..", "..", "..");
-    const coursesTs = path.join(repoRoot, "apps", "web", "app", "courses", "courses.data.ts");
+    // FK-safe wipe (stops duplicates forever)
+    await pool.query(`TRUNCATE TABLE enrollments, courses RESTART IDENTITY CASCADE;`);
 
-    const source = await fs.readFile(coursesTs, "utf8");
-    const transformed = await esbuild.transform(source, {
-      loader: "ts",
-      format: "esm",
-      target: "es2022",
-      sourcemap: false,
-    });
-
-    const dataUrl = `data:text/javascript;base64,${Buffer.from(transformed.code).toString("base64")}`;
-    const mod = await import(dataUrl);
-
-    const webCourses = mod.COURSES || [];
-    if (!Array.isArray(webCourses) || webCourses.length === 0) {
-      return res.status(400).json({ ok: false, error: "Expected export const COURSES = [...]" });
-    }
+    const webCourses = await loadWebCoursesArray();
 
     let inserted = 0;
-    let updated = 0;
-
     for (const c of webCourses) {
-      const title = String(c.title || c.name || "").trim();
+      const title = normText(c.title || c.name || "");
       if (!title) continue;
 
-      const subject = String(c.subject || c.category || c.area || c.track || "General").trim() || "General";
-      const description = String(c.summary || c.description || "").trim() || "No description";
-      const level = String(c.level || c.difficulty || "beginner").trim().toLowerCase() || "beginner";
-      const language = String(c.language || "en").trim().toLowerCase() || "en";
+      const subject = normText(mapToMasterSubject(c));
+      const subject_slug = slugify(subject);
+      const description = normText(c.summary || c.description || "") || "No description";
+      const level = normKey(c.level || c.difficulty || "beginner") || "beginner";
+      const language = normKey(c.language || "en") || "en";
       const is_free = Boolean(c.is_free ?? c.free ?? false);
 
-      const stableKey = `${title}::${subject}`;
-      const id = crypto
-        .createHash("sha1")
-        .update(stableKey)
-        .digest("hex")
-        .replace(/^(.{8})(.{4})(.{4})(.{4})(.{12}).*$/, "$1-$2-$3-$4-$5");
+      // stable ID prevents duplicates even if re-imported
+      const key = `${normKey(title)}::${normKey(subject)}`;
+      const id = stableUuidFromKey(key);
 
-      const r = await pool.query(
-        `INSERT INTO courses (id, title, subject, level, language, description, is_free, source)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,'import')
-         ON CONFLICT (id) DO UPDATE SET
-           title=EXCLUDED.title,
-           subject=EXCLUDED.subject,
+      await pool.query(
+        `INSERT INTO courses (id, title, subject, subject_slug, level, language, description, is_free, source)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'import')
+         ON CONFLICT (lower(title), lower(subject)) DO UPDATE SET
+           subject_slug=EXCLUDED.subject_slug,
            level=EXCLUDED.level,
            language=EXCLUDED.language,
            description=EXCLUDED.description,
            is_free=EXCLUDED.is_free,
-           source='import'
-         RETURNING (xmax = 0) AS inserted;`,
-        [id, title, subject, level, language, description, is_free]
+           source='import';`,
+        [id, title, subject, subject_slug, level, language, description, is_free]
       );
 
-      if (r.rows?.[0]?.inserted) inserted++;
-      else updated++;
+      inserted++;
     }
 
-    const count = await pool.query(`SELECT COUNT(*)::int AS n FROM courses;`);
-    res.json({ ok: true, inserted, updated, total: count.rows[0].n });
+    const total = await pool.query(`SELECT COUNT(*)::int AS n FROM courses;`);
+    res.json({ ok: true, inserted, total: total.rows[0].n });
   } catch (e) {
-    console.error("POST /admin/import-web-courses error:", e);
+    console.error("POST /admin/replace-web-courses error:", e);
     res.status(500).json({ ok: false, error: String(e?.message || e) });
   }
 });
@@ -306,4 +361,3 @@ app.use((req, res) => res.status(404).json({ ok: false, error: "Not found" }));
 
 const port = process.env.PORT || 10000;
 app.listen(port, () => console.log(`API listening on ${port}`));
-
