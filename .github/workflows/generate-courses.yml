@@ -1,0 +1,51 @@
+name: Generate Courses Catalog
+
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Show environment
+        run: |
+          set -eux
+          node -v
+          npm -v
+          pwd
+          ls -la
+          ls -la apps || true
+          ls -la apps/web || true
+          ls -la apps/web/scripts || true
+          ls -la apps/web/app/courses || true
+
+      - name: Verify generator exists
+        run: |
+          set -eux
+          test -f apps/web/scripts/generate-courses.mjs
+          echo "FOUND generator:"
+          ls -la apps/web/scripts/generate-courses.mjs
+
+      - name: Run generator
+        run: |
+          set -eux
+          node apps/web/scripts/generate-courses.mjs
+          echo "Generated file preview:"
+          ls -la apps/web/app/courses/courses.data.ts
+          head -n 20 apps/web/app/courses/courses.data.ts
+
+      - name: Commit generated catalog
+        run: |
+          set -eux
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git add apps/web/app/courses/courses.data.ts
+          git status
+          git commit -m "chore(web): generate full courses catalog" || echo "Nothing to commit"
+          git push
